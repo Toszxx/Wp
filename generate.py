@@ -16,6 +16,39 @@ TIME_RANGES = {
 MONTHS = {'I':1,'II':2,'III':3,'IV':4,'V':5,'VI':6,
           'VII':7,'VIII':8,'IX':9,'X':10,'XI':11,'XII':12}
 
+# Znane skróty typów zajęć (w, ćwiczenia, laboratorium, projekt, egzamin...)
+KNOWN_TYPES = {
+    'w','W','ć','Ć','c','C','L','l','P','p','E','e','S','s','Z','z',
+    'Ep','ep','Zp','zp','Lab','lab','ćw','Ćw','CW','cw','Cw',
+}
+
+def is_type_token(tok):
+    """Czy token wygląda na typ zajęć (w, ć, L, Ep, Lab…)."""
+    if not tok: return False
+    if not re.match(r'^[A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ]+$', tok):
+        return False
+    if tok in KNOWN_TYPES:
+        return True
+    if len(tok) <= 2:
+        return True
+    return False
+
+def format_title_and_desc(lines):
+    """
+    lines = [tytuł, (typ), sala, prowadzący, ...]
+    Zwraca (tytuł_z_typem, opis).
+    Np. ['Ed','w','204 136','Hof'] -> ('Ed (w)', '204 136\\nHof')
+        ['Ing']                    -> ('Ing', '')
+    """
+    if not lines:
+        return '', ''
+    title = lines[0]
+    rest = lines[1:]
+    if rest and is_type_token(rest[0]):
+        title = f'{title} ({rest[0]})'
+        rest = rest[1:]
+    return title, '\n'.join(rest)
+
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -119,10 +152,7 @@ def parse_table(table):
                 for br in cell.find_all('br'): br.replace_with('\n')
                 lines = [l.strip() for l in cell.get_text().split('\n') if l.strip()]
                 if not lines: continue
-                d['slots'].append({
-                    'time': tk, 'title': lines[0],
-                    'description': '\n'.join(lines[1:])
-                })
+                d['slots'].append({'time': tk, 'lines': lines})
     return result
 
 def to_ics(days):
@@ -133,13 +163,18 @@ def to_ics(days):
     for d in days:
         y, m, dd = d['date']
         for slot in d['slots']:
-            title = slot['title']
-            if re.match(r'^(P\.św|Św\.|ŚwA)$', title): continue
+            lines = slot['lines']
+            if not lines: continue
+            base_title = lines[0]
+            if re.match(r'^(P\.św|Św\.|ŚwA)$', base_title): continue
             if slot['time'] not in TIME_RANGES: continue
+
+            title, description = format_title_and_desc(lines)
+
             s, e = TIME_RANGES[slot['time']]
             dtstart = f'{y}{m:02d}{dd:02d}T{s.replace(":","")}00'
             dtend   = f'{y}{m:02d}{dd:02d}T{e.replace(":","")}00'
-            desc = slot['description'].replace('\\','\\\\').replace(';','\\;').replace(',','\\,').replace('\n','\\n')
+            desc = description.replace('\\','\\\\').replace(';','\\;').replace(',','\\,').replace('\n','\\n')
             ttl  = title.replace('\\','\\\\').replace(';','\\;').replace(',','\\,')
             L += ['BEGIN:VEVENT',
                   f'UID:wat-{y}{m:02d}{dd:02d}-{slot["time"].replace("-","")}-{uid}@github',
