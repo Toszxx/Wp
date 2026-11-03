@@ -1,0 +1,25 @@
+name: Update schedule
+on:
+  schedule:
+    - cron: '0 6 * * *'   # codziennie 6:00 UTC (8:00 rano czasu PL latem)
+  workflow_dispatch:       # ręczne uruchomienie z zakładki Actions
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install beautifulsoup4
+      - run: python generate.py
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add plan.ics
+          git diff --cached --quiet && echo "Bez zmian" && exit 0
+          git commit -m "Update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
