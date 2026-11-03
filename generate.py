@@ -1,4 +1,6 @@
 import urllib.request
+import urllib.parse
+import urllib.error
 import re
 from datetime import datetime, timezone
 
@@ -14,17 +16,56 @@ TIME_RANGES = {
 MONTHS = {'I':1,'II':2,'III':3,'IV':4,'V':5,'VI':6,
           'VII':7,'VIII':8,'IX':9,'X':10,'XI':11,'XII':12}
 
-def fetch_html():
-    req = urllib.request.Request(URL, headers={'User-Agent': 'Mozilla/5.0'})
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    'Connection': 'keep-alive',
+}
+
+PROXIES = [
+    ('direct',       lambda u: u),
+    ('allorigins',   lambda u: 'https://api.allorigins.win/raw?url=' + urllib.parse.quote(u, safe='')),
+    ('corsproxy.io', lambda u: 'https://corsproxy.io/?url=' + urllib.parse.quote(u, safe='')),
+    ('codetabs',     lambda u: 'https://api.codetabs.com/v1/proxy?quest=' + urllib.parse.quote(u, safe='')),
+]
+
+def try_fetch(url):
+    req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=30) as r:
-        raw = r.read()
+        return r.read()
+
+def decode(raw):
     try:
         html = raw.decode('utf-8')
-        if '\ufffd' in html:
-            html = raw.decode('windows-1250')
+        if '\ufffd' not in html:
+            return html
     except Exception:
-        html = raw.decode('windows-1250', errors='replace')
-    return html
+        pass
+    try:
+        return raw.decode('windows-1250')
+    except Exception:
+        return raw.decode('utf-8', errors='replace')
+
+def fetch_html():
+    last_err = None
+    for name, build in PROXIES:
+        try:
+            print(f'[fetch] próbuję: {name}…')
+            raw  = try_fetch(build(URL))
+            html = decode(raw)
+            if len(html) > 500 and 'pon.' in html:
+                print(f'[fetch] OK {name}: {len(raw)} B, {len(html)} znaków')
+                return html
+            print(f'[fetch] X {name}: nie wygląda na plan ({len(html)} znaków)')
+        except Exception as e:
+            print(f'[fetch] X {name}: {e}')
+            last_err = e
+    raise RuntimeError(f'Wszystkie źródła zawiodły: {last_err}')
 
 def find_main_table(soup):
     best, best_score = None, 0
@@ -61,7 +102,11 @@ def parse_table(table):
                 mn = MONTHS.get(parts[1].upper())
                 if not mn: continue
                 year = 2026 if mn >= 9 else 2027
-                current.append({'day': day, 'date': (year, mn, int(parts[0])), 'slots': []})
+                try:
+                    dd = int(parts[0])
+                except ValueError:
+                    continue
+                current.append({'day': day, 'date': (year, mn, dd), 'slots': []})
             result.extend(current)
             continue
 
